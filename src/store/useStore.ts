@@ -49,6 +49,10 @@ interface Order {
   total_amount: number
   created_at: string
   items: OrderItem[]
+  delivery_method?: 'logistics' | 'local_delivery' | 'self_pickup'
+  backorder_note?: string
+  payment_due_days?: number
+  payment_due_date?: string
 }
 
 interface Reminder {
@@ -112,8 +116,23 @@ interface AppState {
   fetchRecommendations: (implantCount: number, orthoCount: number, cleaningCount: number) => Promise<void>
   fetchOrders: (clinicId?: string) => Promise<void>
   fetchOrder: (id: string) => Promise<Order | null>
-  createOrder: (clinicId: string, items: { product_id: string; quantity: number }[]) => Promise<Order | null>
-  generateConfirmation: (orderId: string) => Promise<string>
+  createOrder: (
+    clinicId: string,
+    items: { product_id: string; quantity: number }[],
+    extras?: {
+      delivery_method?: 'logistics' | 'local_delivery' | 'self_pickup'
+      backorder_note?: string
+      payment_due_days?: number
+    },
+  ) => Promise<Order | null>
+  generateConfirmation: (
+    orderId: string,
+    extras?: {
+      delivery_method?: 'logistics' | 'local_delivery' | 'self_pickup'
+      backorder_note?: string
+      payment_due_days?: number
+    },
+  ) => Promise<string>
   fetchReminders: (status?: string) => Promise<void>
   fetchTodayReminders: () => Promise<void>
   updateReminderStatus: (id: string, status: string) => Promise<void>
@@ -247,11 +266,11 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  createOrder: async (clinicId, items) => {
+  createOrder: async (clinicId, items, extras?) => {
     try {
       const data = await apiFetch<Order>('/orders', {
         method: 'POST',
-        body: JSON.stringify({ clinic_id: clinicId, items }),
+        body: JSON.stringify({ clinic_id: clinicId, items, ...extras }),
       })
       set((state) => ({ orders: [...state.orders, data] }))
       return data
@@ -260,15 +279,38 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  generateConfirmation: async (orderId) => {
+  generateConfirmation: async (orderId, extras?) => {
     try {
       const data = await apiFetch<{ confirmation_text: string }>(`/orders/${orderId}/confirm`, {
         method: 'POST',
+        body: JSON.stringify(extras || {}),
       })
       return data.confirmation_text
     } catch {
       return ''
     }
+  },
+
+  addToCart: (product, quantity) => {
+    if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isInteger(quantity)) return
+    set((state) => {
+      const existing = state.cart.find((item) => item.product.id === product.id)
+      if (existing) {
+        return {
+          cart: state.cart.map((item) =>
+            item.product.id === product.id ? { ...item, quantity: item.quantity + quantity } : item,
+          ),
+        }
+      }
+      return { cart: [...state.cart, { product, quantity }] }
+    })
+  },
+
+  updateCartItemQuantity: (productId, quantity) => {
+    const safeQty = Number.isFinite(quantity) && quantity > 0 && Number.isInteger(quantity) ? quantity : 1
+    set((state) => ({
+      cart: state.cart.map((item) => (item.product.id === productId ? { ...item, quantity: safeQty } : item)),
+    }))
   },
 
   fetchReminders: async (status?) => {
@@ -320,26 +362,6 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   setSelectedClinic: (clinic) => set({ selectedClinic: clinic }),
-
-  addToCart: (product, quantity) => {
-    set((state) => {
-      const existing = state.cart.find((item) => item.product.id === product.id)
-      if (existing) {
-        return {
-          cart: state.cart.map((item) =>
-            item.product.id === product.id ? { ...item, quantity: item.quantity + quantity } : item,
-          ),
-        }
-      }
-      return { cart: [...state.cart, { product, quantity }] }
-    })
-  },
-
-  updateCartItemQuantity: (productId, quantity) => {
-    set((state) => ({
-      cart: state.cart.map((item) => (item.product.id === productId ? { ...item, quantity } : item)),
-    }))
-  },
 
   removeFromCart: (productId) => {
     set((state) => ({ cart: state.cart.filter((item) => item.product.id !== productId) }))

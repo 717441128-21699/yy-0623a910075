@@ -21,7 +21,26 @@ router.get('/', (req: Request, res: Response): void => {
     result = result.filter((c) => c.area === area)
   }
 
-  res.json({ success: true, data: result })
+  const enriched = result.map((c) => {
+    const clinicPurchases = purchaseHistory.filter((p) => p.clinic_id === c.id)
+    const lastPurchaseDate =
+      clinicPurchases.length > 0
+        ? clinicPurchases.sort((a, b) => b.purchased_at.localeCompare(a.purchased_at))[0]
+            .purchased_at
+        : null
+
+    const outstandingOrderCount = orders.filter(
+      (o) => o.clinic_id === c.id && (o.status === 'pending' || o.status === 'partial'),
+    ).length
+
+    return {
+      ...c,
+      last_purchase_date: lastPurchaseDate,
+      outstanding_order_count: outstandingOrderCount,
+    }
+  })
+
+  res.json({ success: true, data: enriched })
 })
 
 router.get('/:id', (req: Request, res: Response): void => {

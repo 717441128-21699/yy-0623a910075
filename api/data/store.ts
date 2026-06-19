@@ -53,6 +53,10 @@ export interface Order {
   total_amount: number
   created_at: string
   items: OrderItem[]
+  delivery_method?: 'logistics' | 'local_delivery' | 'self_pickup'
+  backorder_note?: string
+  payment_due_days?: number
+  payment_due_date?: string
 }
 
 export interface Reminder {

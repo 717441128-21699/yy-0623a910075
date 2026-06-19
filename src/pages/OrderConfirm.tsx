@@ -10,24 +10,39 @@ const STATUS_MAP: Record<string, { label: string; cls: string }> = {
   completed: { label: '已完成', cls: 'badge-completed' },
 }
 
-const DELIVERY_OPTIONS = [
+const DELIVERY_OPTIONS: Array<{ value: 'logistics' | 'local_delivery' | 'self_pickup'; label: string; icon: typeof Truck }> = [
   { value: 'logistics', label: '物流配送', icon: Truck },
-  { value: 'local', label: '同城送货', icon: Bike },
-  { value: 'pickup', label: '自提', icon: PackageOpen },
+  { value: 'local_delivery', label: '同城送货', icon: Bike },
+  { value: 'self_pickup', label: '自提', icon: PackageOpen },
+]
+
+const PAYMENT_TERMS = [
+  { value: 7, label: '7天' },
+  { value: 15, label: '15天' },
+  { value: 30, label: '30天' },
+  { value: 60, label: '60天' },
 ]
 
 export default function OrderConfirm() {
   const { id } = useParams<{ id: string }>()
   const { fetchOrder, generateConfirmation, loading } = useStore()
   const [order, setOrder] = useState<Order | null>(null)
-  const [delivery, setDelivery] = useState('logistics')
+  const [delivery, setDelivery] = useState<'logistics' | 'local_delivery' | 'self_pickup'>('logistics')
   const [backorderNote, setBackorderNote] = useState('')
+  const [paymentDueDays, setPaymentDueDays] = useState(30)
   const [modalOpen, setModalOpen] = useState(false)
   const [confirmText, setConfirmText] = useState('')
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
-    if (id) fetchOrder(id).then((o) => o && setOrder(o))
+    if (id) fetchOrder(id).then((o) => {
+      if (o) {
+        setOrder(o)
+        if (o.delivery_method) setDelivery(o.delivery_method)
+        if (o.backorder_note) setBackorderNote(o.backorder_note)
+        if (o.payment_due_days) setPaymentDueDays(o.payment_due_days)
+      }
+    })
   }, [id])
 
   if (!order) {
@@ -37,11 +52,15 @@ export default function OrderConfirm() {
   const giftCount = order.items.filter((i) => i.gifted).length
   const taxTotal = order.items.reduce((sum, i) => sum + i.subtotal * i.tax_rate / (1 + i.tax_rate), 0)
   const dueDate = new Date(order.created_at)
-  dueDate.setDate(dueDate.getDate() + 30)
+  dueDate.setDate(dueDate.getDate() + paymentDueDays)
   const statusInfo = STATUS_MAP[order.status] ?? STATUS_MAP.pending
 
   const handleGenerate = async () => {
-    const text = await generateConfirmation(order.id)
+    const text = await generateConfirmation(order.id, {
+      delivery_method: delivery,
+      backorder_note: backorderNote,
+      payment_due_days: paymentDueDays,
+    })
     if (text) { setConfirmText(text); setModalOpen(true) }
   }
 
@@ -109,8 +128,26 @@ export default function OrderConfirm() {
       </div>
 
       <div className="bg-white rounded-xl p-5 shadow-sm mb-5">
-        <p className="text-sm text-surface-500">付款期限：下单后30天</p>
-        <p className="text-sm font-medium text-surface-700 mt-1">到期日：{dueDate.toISOString().slice(0, 10)}</p>
+        <p className="text-sm font-medium text-surface-700 mb-3">付款期限</p>
+        <div className="flex gap-3">
+          {PAYMENT_TERMS.map((term) => (
+            <button
+              key={term.value}
+              onClick={() => setPaymentDueDays(term.value)}
+              className={`px-4 py-2 rounded-lg text-sm transition-colors border ${
+                paymentDueDays === term.value
+                  ? 'bg-dental-500 border-dental-500 text-white'
+                  : 'bg-white border-surface-200 text-surface-500 hover:border-dental-300'
+              }`}
+            >
+              {term.label}
+            </button>
+          ))}
+        </div>
+        <div className="mt-3 flex items-center gap-3 text-sm">
+          <span className="text-surface-500">到期日：</span>
+          <span className="font-medium text-accent-600">{dueDate.toISOString().slice(0, 10)}</span>
+        </div>
       </div>
 
       <div className="sticky bottom-0 bg-white border-t border-surface-200 shadow-lg z-10 -mx-6 px-6 py-4">

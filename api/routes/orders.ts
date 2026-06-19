@@ -35,9 +35,18 @@ router.get('/:id', (req: Request, res: Response): void => {
 })
 
 router.post('/', (req: Request, res: Response): void => {
-  const { clinic_id, items } = req.body as {
+  const {
+    clinic_id,
+    items,
+    delivery_method,
+    backorder_note,
+    payment_due_days = 30,
+  } = req.body as {
     clinic_id: string
     items: { product_id: string; quantity: number }[]
+    delivery_method?: 'logistics' | 'local_delivery' | 'self_pickup'
+    backorder_note?: string
+    payment_due_days?: number
   }
 
   const clinic = clinics.find((c) => c.id === clinic_id)
@@ -49,6 +58,16 @@ router.post('/', (req: Request, res: Response): void => {
   if (!items || !Array.isArray(items) || items.length === 0) {
     res.status(400).json({ success: false, error: '订单必须包含至少一项商品' })
     return
+  }
+
+  for (const item of items) {
+    if (!Number.isFinite(item.quantity) || item.quantity <= 0 || !Number.isInteger(item.quantity)) {
+      res.status(400).json({
+        success: false,
+        error: `商品数量必须为正整数，产品 ${item.product_id} 的数量非法`,
+      })
+      return
+    }
   }
 
   const orderItems: OrderItem[] = []
@@ -107,6 +126,9 @@ router.post('/', (req: Request, res: Response): void => {
     oi.order_id = orderId
   }
 
+  const dueDate = new Date()
+  dueDate.setDate(dueDate.getDate() + payment_due_days)
+
   const order: Order = {
     id: orderId,
     clinic_id: clinic.id,
@@ -115,6 +137,10 @@ router.post('/', (req: Request, res: Response): void => {
     total_amount: +totalAmount.toFixed(2),
     created_at: new Date().toISOString(),
     items: orderItems,
+    delivery_method,
+    backorder_note: backorder_note || '',
+    payment_due_days,
+    payment_due_date: dueDate.toISOString().split('T')[0],
   }
 
   orders.push(order)
@@ -165,6 +191,33 @@ router.post('/:id/confirm', (req: Request, res: Response): void => {
     return
   }
 
+  const {
+    delivery_method,
+    backorder_note,
+    payment_due_days,
+  } = req.body as {
+    delivery_method?: 'logistics' | 'local_delivery' | 'self_pickup'
+    backorder_note?: string
+    payment_due_days?: number
+  }
+
+  const effectiveDelivery = delivery_method || order.delivery_method
+  const effectiveBackorder = backorder_note ?? order.backorder_note
+  const effectiveDueDays = payment_due_days || order.payment_due_days || 30
+
+  let effectiveDueDate = order.payment_due_date
+  if (payment_due_days && payment_due_days !== order.payment_due_days) {
+    const d = new Date(order.created_at)
+    d.setDate(d.getDate() + payment_due_days)
+    effectiveDueDate = d.toISOString().split('T')[0]
+  }
+
+  const deliveryLabel: Record<string, string> = {
+    logistics: '物流配送',
+    local_delivery: '同城送货',
+    self_pickup: '自提',
+  }
+
   const clinic = clinics.find((c) => c.id === order.clinic_id)
   const divider = '═'.repeat(50)
   const thinDivider = '─'.repeat(50)
@@ -197,7 +250,14 @@ router.post('/:id/confirm', (req: Request, res: Response): void => {
   }
 
   text += `\n${thinDivider}\n`
-  text += `合计金额：¥${order.total_amount.toFixed(2)}\n`
+  text += `合计金额：¥${order.total_amount.toFixed(2)}\n\n`
+  text += `配送方式：${deliveryLabel[effectiveDelivery || 'logistics'] || '物流配送'}\n`
+
+  if (effectiveBackorder && effectiveBackorder.trim()) {
+    text += `欠货说明：${effectiveBackorder.trim()}\n`
+  }
+  text += `付款期限：下单后${effectiveDueDays}天\n`
+  text += `到期日期：${effectiveDueDate}\n`
   text += `${divider}\n`
   text += `    请确认以上订货信息，如有问题请及时联系\n`
   text += `${divider}\n`

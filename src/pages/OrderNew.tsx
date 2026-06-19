@@ -51,6 +51,11 @@ export default function OrderNew() {
 
   const handleSubmit = async () => {
     if (!selectedClinic || cart.length === 0) return
+    const hasInvalid = cart.some(i => !Number.isInteger(i.quantity) || i.quantity <= 0)
+    if (hasInvalid) {
+      alert('购物车中存在异常数量，请修正后再提交')
+      return
+    }
     applyGiftPoliciesToCart()
     const items = cart.map(i => ({ product_id: i.product.id, quantity: i.quantity }))
     const order = await createOrder(selectedClinic.id, items)
@@ -58,6 +63,22 @@ export default function OrderNew() {
       clearCart()
       navigate(`/order/confirm/${order.id}`)
     }
+  }
+
+  const decQty = (pid: string, cur: number) => {
+    if (cur <= 1) return
+    updateCartItemQuantity(pid, cur - 1)
+  }
+
+  const incQty = (pid: string, cur: number) => {
+    updateCartItemQuantity(pid, cur + 1)
+  }
+
+  const setQtyDirect = (pid: string, raw: number | string) => {
+    let v = Number(raw)
+    if (!Number.isFinite(v) || v < 1) v = 1
+    v = Math.floor(v)
+    updateCartItemQuantity(pid, v)
   }
 
   const totalAmount = cart.reduce((sum, i) => sum + i.product.price * i.quantity * (1 + i.product.tax_rate), 0)
@@ -215,13 +236,25 @@ export default function OrderNew() {
                 <p className="text-xs text-surface-400">{item.product.brand} · {item.product.spec}</p>
                 <div className="flex items-center justify-between mt-2">
                   <div className="flex items-center gap-2">
-                    <button className="w-6 h-6 rounded border border-surface-200 flex items-center justify-center hover:bg-surface-50"
-                      onClick={() => updateCartItemQuantity(item.product.id, item.quantity - 1)}>
+                    <button
+                      className={`w-6 h-6 rounded border flex items-center justify-center ${item.quantity <= 1 ? 'border-surface-100 text-surface-200 cursor-not-allowed' : 'border-surface-200 hover:bg-surface-50 text-surface-700'}`}
+                      onClick={() => decQty(item.product.id, item.quantity)}
+                      disabled={item.quantity <= 1}
+                    >
                       <Minus className="w-3 h-3" />
                     </button>
-                    <span className="text-sm w-8 text-center">{item.quantity}</span>
-                    <button className="w-6 h-6 rounded border border-surface-200 flex items-center justify-center hover:bg-surface-50"
-                      onClick={() => updateCartItemQuantity(item.product.id, item.quantity + 1)}>
+                    <input
+                      type="number"
+                      min={1}
+                      className="w-14 text-center text-sm border border-surface-200 rounded py-1 focus:outline-none focus:border-dental-400"
+                      value={item.quantity}
+                      onChange={(e) => setQtyDirect(item.product.id, e.target.value)}
+                      onBlur={(e) => setQtyDirect(item.product.id, e.target.value)}
+                    />
+                    <button
+                      className="w-6 h-6 rounded border border-surface-200 flex items-center justify-center hover:bg-surface-50 text-surface-700"
+                      onClick={() => incQty(item.product.id, item.quantity)}
+                    >
                       <Plus className="w-3 h-3" />
                     </button>
                   </div>
