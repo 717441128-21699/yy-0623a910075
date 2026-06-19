@@ -1,14 +1,16 @@
-import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Search, Plus, Minus, X, ShoppingCart, Stethoscope, Sparkles, Gift, CheckCircle } from 'lucide-react'
-import { useStore } from '@/store/useStore'
+import { useState, useEffect, useMemo } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Search, Plus, Minus, X, ShoppingCart, Stethoscope, Sparkles, Gift, CheckCircle, AlertTriangle, Lightbulb, Package } from 'lucide-react'
+import { useStore, type Reminder } from '@/store/useStore'
 
 export default function OrderNew() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const {
     clinics, fetchClinics, products, fetchProducts,
     recommendedProducts, fetchRecommendations,
     giftPolicies, fetchGiftPolicies,
+    reminders, fetchTodayReminders,
     cart, addToCart, updateCartItemQuantity, removeFromCart, clearCart,
     applyGiftPoliciesToCart, selectedClinic, setSelectedClinic, createOrder,
   } = useStore()
@@ -22,8 +24,59 @@ export default function OrderNew() {
   const [addingId, setAddingId] = useState<string | null>(null)
   const [addQty, setAddQty] = useState(1)
 
+  const urlClinicId = searchParams.get('clinic_id')
+  const urlClinicName = searchParams.get('clinic_name')
+  const urlReminderId = searchParams.get('reminder_id')
+
   useEffect(() => { fetchClinics() }, [])
   useEffect(() => { fetchGiftPolicies() }, [])
+  useEffect(() => { fetchProducts() }, [])
+  useEffect(() => {
+    if (urlReminderId) fetchTodayReminders()
+  }, [urlReminderId])
+
+  // 根据 URL 参数自动选中诊所
+  useEffect(() => {
+    if (urlClinicId && !selectedClinic && clinics.length > 0) {
+      const clinic = clinics.find((c) => c.id === urlClinicId)
+      if (clinic) {
+        setSelectedClinic(clinic)
+      } else if (urlClinicName) {
+        // 如果诊所列表里找不到（可能还没加载完或数据不全），先构造一个最小化对象
+        setSelectedClinic({
+          id: urlClinicId,
+          name: urlClinicName,
+          address: '',
+          area: '',
+          contact: '',
+          phone: '',
+        })
+      }
+    }
+  }, [urlClinicId, urlClinicName, clinics, selectedClinic, setSelectedClinic])
+
+  // 从 URL 提醒中找到对应提醒
+  const sourceReminder: Reminder | null = useMemo(() => {
+    if (!urlReminderId) return null
+    return reminders.find((r) => r.id === urlReminderId) || null
+  }, [urlReminderId, reminders])
+
+  // 计算购物车中库存不足的品项
+  const cartBackorderInfo = useMemo(() => {
+    const items: { product_id: string; product_name: string; stock: number; shortage: number; unit: string }[] = []
+    for (const item of cart) {
+      if (item.quantity > item.product.stock) {
+        items.push({
+          product_id: item.product.id,
+          product_name: item.product.name,
+          stock: item.product.stock,
+          shortage: item.quantity - item.product.stock,
+          unit: item.product.unit,
+        })
+      }
+    }
+    return items
+  }, [cart])
 
   const filteredClinics = clinics.filter(c =>
     c.name.includes(clinicSearch) || c.address?.includes(clinicSearch)
@@ -49,6 +102,15 @@ export default function OrderNew() {
     setAddQty(1)
   }
 
+  const addReminderProduct = () => {
+    if (!sourceReminder) return
+    const product = products.find((p) => p.id === sourceReminder.product_id)
+    if (product) {
+      const qty = sourceReminder.suggested_quantity || 1
+      addToCart(product, qty)
+    }
+  }
+
   const handleSubmit = async () => {
     if (!selectedClinic || cart.length === 0) return
     const hasInvalid = cart.some(i => !Number.isInteger(i.quantity) || i.quantity <= 0)
@@ -58,7 +120,10 @@ export default function OrderNew() {
     }
     applyGiftPoliciesToCart()
     const items = cart.map(i => ({ product_id: i.product.id, quantity: i.quantity }))
-    const order = await createOrder(selectedClinic.id, items)
+    const order = await createOrder(selectedClinic.id, items, {
+      from_reminder_id: urlReminderId || undefined,
+      operator: '李明',
+    })
     if (order) {
       clearCart()
       navigate(`/order/confirm/${order.id}`)
@@ -124,6 +189,37 @@ export default function OrderNew() {
             )}
           </div>
 
+          {/* Reminder Suggestion */}
+          {sourceReminder && (
+            <div className="bg-gradient-to-br from-accent-50 to-white border border-accent-200 rounded-xl p-4 shadow-sm">
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-lg bg-accent-500/10 flex items-center justify-center flex-shrink-0">
+                  <Lightbulb className="w-5 h-5 text-accent-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-sm font-bold text-accent-700">补货提醒建议</h3>
+                    <span className="text-[10px] font-medium text-white bg-accent-500 px-1.5 py-0.5 rounded">来自回访提醒</span>
+                  </div>
+                  <p className="text-sm font-medium text-surface-800 mt-1">{sourceReminder.product_name}</p>
+                  <p className="text-xs text-surface-500 mt-0.5">{sourceReminder.message}</p>
+                  {sourceReminder.suggested_quantity && (
+                    <p className="text-xs text-dental-600 font-medium mt-1">
+                      建议数量：{sourceReminder.suggested_quantity}
+                      {products.find(p => p.id === sourceReminder.product_id)?.unit || ''}
+                    </p>
+                  )}
+                  <button
+                    onClick={addReminderProduct}
+                    className="btn-accent w-full mt-3 text-sm flex items-center justify-center gap-1.5"
+                  >
+                    <Plus className="w-4 h-4" /> 一键加入购物车
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Scene Inputs */}
           <div className="bg-white rounded-xl border border-surface-200 p-4 space-y-3">
             <h3 className="text-sm font-semibold text-surface-700 flex items-center gap-1.5">
@@ -158,6 +254,11 @@ export default function OrderNew() {
                       <p className="text-sm font-medium truncate">{rp.product.name}</p>
                       <p className="text-xs text-surface-400">{rp.product.brand} · <span className="text-dental-600">{rp.scene}</span></p>
                       <p className="text-xs text-surface-500 mt-0.5">建议 {rp.suggested_quantity}{rp.product.unit} · ¥{rp.product.price}/{rp.product.unit}</p>
+                      <p className={`text-xs mt-0.5 ${rp.product.stock <= 5 ? 'text-amber-600 font-medium' : 'text-emerald-600'}`}>
+                        <Package className="w-3 h-3 inline mr-0.5" />
+                        库存 {rp.product.stock}{rp.product.unit}
+                        {rp.product.stock <= 5 && ' · 库存紧张'}
+                      </p>
                     </div>
                     {addingId === rp.product.id ? (
                       <div className="flex items-center gap-1">
@@ -196,6 +297,9 @@ export default function OrderNew() {
                     <div className="flex-1 min-w-0">
                       <p className="text-sm truncate">{p.name}</p>
                       <p className="text-xs text-surface-400">{p.brand} · ¥{p.price}/{p.unit}</p>
+                      <p className={`text-[11px] ${p.stock <= 5 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                        库存 {p.stock}{p.unit}
+                      </p>
                     </div>
                     {addingId === p.id ? (
                       <div className="flex items-center gap-1">
@@ -270,6 +374,12 @@ export default function OrderNew() {
                     <Gift className="w-3 h-3 mr-1" /> {item.appliedGiftPolicy.description}
                   </div>
                 )}
+                {item.quantity > item.product.stock && (
+                  <div className="mt-2 flex items-start gap-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                    <span>库存不足，现仅 {item.product.stock}{item.product.unit}，欠货 {item.quantity - item.product.stock}{item.product.unit}</span>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -278,6 +388,22 @@ export default function OrderNew() {
               <span className="text-surface-500">共 {totalItems} 件</span>
               <span className="font-semibold">合计（含税）¥{totalAmount.toFixed(2)}</span>
             </div>
+            {cartBackorderInfo.length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-2.5 text-xs text-amber-700">
+                <div className="font-medium flex items-center gap-1 mb-1">
+                  <AlertTriangle className="w-3.5 h-3.5" /> 库存预警：{cartBackorderInfo.length} 项欠货
+                </div>
+                <div className="space-y-0.5">
+                  {cartBackorderInfo.map(b => (
+                    <div key={b.product_id} className="flex justify-between">
+                      <span>{b.product_name}</span>
+                      <span>缺 {b.shortage}{b.unit}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="text-[11px] text-amber-600 mt-1">提交后将自动生成欠货说明</div>
+              </div>
+            )}
             <button className="btn-primary w-full text-sm"
               disabled={cart.length === 0 || !selectedClinic} onClick={handleSubmit}>
               提交订单

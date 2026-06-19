@@ -1,16 +1,17 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { MapPin, Phone, User, ShoppingCart, Calendar, Package } from 'lucide-react'
+import { MapPin, Phone, User, ShoppingCart, Calendar, Package, MessageSquare, PhoneCall, Home, FileText, Plus, X, Clock } from 'lucide-react'
 import { useStore } from '@/store/useStore'
-import type { Clinic, Product, BrandPreference, Order } from '@/store/useStore'
+import type { Clinic, Product, BrandPreference, Order, FollowUp } from '@/store/useStore'
 
-type Tab = 'overview' | 'consumables' | 'brands' | 'orders'
+type Tab = 'overview' | 'consumables' | 'brands' | 'orders' | 'follow-ups'
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'overview', label: '概览' },
   { key: 'consumables', label: '常用耗材' },
   { key: 'brands', label: '品牌偏好' },
   { key: 'orders', label: '未结订单' },
+  { key: 'follow-ups', label: '跟进记录' },
 ]
 
 const statusMap: Record<string, { label: string; cls: string }> = {
@@ -22,7 +23,10 @@ const statusMap: Record<string, { label: string; cls: string }> = {
 export default function CustomerDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const { fetchClinicDetail, fetchClinicConsumables, fetchClinicBrands, fetchClinicOutstandingOrders } = useStore()
+  const {
+    fetchClinicDetail, fetchClinicConsumables, fetchClinicBrands, fetchClinicOutstandingOrders,
+    followUps, fetchFollowUps, createFollowUp,
+  } = useStore()
 
   const [clinic, setClinic] = useState<Clinic | null>(null)
   const [consumables, setConsumables] = useState<Product[]>([])
@@ -30,6 +34,12 @@ export default function CustomerDetail() {
   const [orders, setOrders] = useState<Order[]>([])
   const [tab, setTab] = useState<Tab>('overview')
   const [loading, setLoading] = useState(true)
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [newFollowUp, setNewFollowUp] = useState({
+    type: 'note' as FollowUp['type'],
+    title: '',
+    content: '',
+  })
 
   useEffect(() => {
     if (!id) return
@@ -39,6 +49,7 @@ export default function CustomerDetail() {
       fetchClinicConsumables(id),
       fetchClinicBrands(id),
       fetchClinicOutstandingOrders(id),
+      fetchFollowUps(id),
     ]).then(([c, p, b, o]) => {
       setClinic(c)
       setConsumables(p)
@@ -53,6 +64,34 @@ export default function CustomerDetail() {
 
   const maxBrandCount = Math.max(...brands.map((b) => b.purchase_count), 1)
 
+  const followUpTypeMap: Record<FollowUp['type'], { label: string; icon: typeof MessageSquare; color: string; bg: string }> = {
+    call: { label: '电话', icon: PhoneCall, color: 'text-dental-600', bg: 'bg-dental-100' },
+    visit: { label: '上门拜访', icon: Home, color: 'text-emerald-600', bg: 'bg-emerald-100' },
+    quote: { label: '报价', icon: FileText, color: 'text-amber-600', bg: 'bg-amber-100' },
+    order: { label: '下单', icon: ShoppingCart, color: 'text-accent-600', bg: 'bg-accent-100' },
+    note: { label: '备注', icon: MessageSquare, color: 'text-surface-600', bg: 'bg-surface-100' },
+  }
+
+  const handleAddFollowUp = async () => {
+    if (!id || !newFollowUp.title.trim()) return
+    await createFollowUp(id, {
+      ...newFollowUp,
+      operator: '李明',
+    })
+    setNewFollowUp({ type: 'note', title: '', content: '' })
+    setShowAddModal(false)
+  }
+
+  const formatDateTime = (isoStr: string) => {
+    const d = new Date(isoStr)
+    return d.toLocaleString('zh-CN', {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  }
+
   return (
     <div className="p-6 max-w-6xl mx-auto">
       <div className="bg-white rounded-xl border border-surface-200 p-5 mb-6">
@@ -65,7 +104,7 @@ export default function CustomerDetail() {
               <span className="flex items-center gap-1"><Phone className="w-4 h-4" />{clinic.phone}</span>
             </div>
           </div>
-          <button className="btn-primary flex items-center gap-2 self-start" onClick={() => navigate('/order/new')}>
+          <button className="btn-primary flex items-center gap-2 self-start" onClick={() => navigate(`/order/new?clinic_id=${encodeURIComponent(clinic.id)}&clinic_name=${encodeURIComponent(clinic.name)}`)}>
             <ShoppingCart className="w-4 h-4" />快捷下单
           </button>
         </div>
@@ -183,6 +222,150 @@ export default function CustomerDetail() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {tab === 'follow-ups' && (
+        <div className="space-y-4">
+          <div className="flex justify-between items-center">
+            <p className="text-sm text-surface-500">共 {followUps.length} 条跟进记录</p>
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="btn-primary text-sm flex items-center gap-1.5"
+            >
+              <Plus className="w-4 h-4" /> 添加记录
+            </button>
+          </div>
+
+          {followUps.length === 0 ? (
+            <div className="text-center py-16 text-surface-400 bg-white rounded-xl border border-dashed border-surface-200">
+              <MessageSquare className="w-10 h-10 mx-auto mb-2 opacity-40" />
+              <p className="text-sm">暂无跟进记录</p>
+              <button
+                onClick={() => setShowAddModal(true)}
+                className="text-sm text-dental-500 hover:underline mt-2"
+              >
+                + 添加第一条记录
+              </button>
+            </div>
+          ) : (
+            <div className="relative pl-6">
+              <div className="absolute left-[7px] top-2 bottom-2 w-px bg-surface-200" />
+              <div className="space-y-4">
+                {followUps.map((fu) => {
+                  const typeInfo = followUpTypeMap[fu.type]
+                  const TypeIcon = typeInfo.icon
+                  return (
+                    <div key={fu.id} className="relative">
+                      <div className={`absolute -left-6 top-1.5 w-4 h-4 rounded-full ${typeInfo.bg} border-2 border-white shadow flex items-center justify-center`}>
+                        <TypeIcon className={`w-2.5 h-2.5 ${typeInfo.color}`} />
+                      </div>
+                      <div className="bg-white rounded-xl border border-surface-200 p-4 card-hover">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${typeInfo.bg} ${typeInfo.color}`}>
+                              {typeInfo.label}
+                            </span>
+                            <span className="text-sm font-medium text-surface-800">{fu.title}</span>
+                          </div>
+                          <div className="flex items-center gap-1 text-xs text-surface-400 flex-shrink-0">
+                            <Clock className="w-3 h-3" />
+                            {formatDateTime(fu.created_at)}
+                          </div>
+                        </div>
+                        <p className="text-sm text-surface-600 mt-2 leading-relaxed">{fu.content}</p>
+                        {fu.related_order_id && (
+                          <div className="mt-2 text-xs text-surface-400">
+                            关联订单：<span className="font-mono text-dental-600">{fu.related_order_id}</span>
+                          </div>
+                        )}
+                        {fu.operator && (
+                          <div className="mt-1 text-xs text-surface-400">
+                            跟进人：{fu.operator}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md m-4 overflow-hidden">
+            <div className="px-5 py-4 border-b border-surface-100 flex items-center justify-between">
+              <h3 className="font-semibold text-surface-900">添加跟进记录</h3>
+              <button
+                onClick={() => setShowAddModal(false)}
+                className="w-8 h-8 rounded-lg hover:bg-surface-100 flex items-center justify-center"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="text-sm font-medium text-surface-600 mb-2 block">跟进类型</label>
+                <div className="grid grid-cols-5 gap-2">
+                  {(Object.keys(followUpTypeMap) as FollowUp['type'][]).map((type) => {
+                    const info = followUpTypeMap[type]
+                    const Icon = info.icon
+                    const active = newFollowUp.type === type
+                    return (
+                      <button
+                        key={type}
+                        onClick={() => setNewFollowUp({ ...newFollowUp, type })}
+                        className={`flex flex-col items-center gap-1 py-2.5 rounded-lg border transition-all ${
+                          active
+                            ? 'border-dental-400 bg-dental-50 text-dental-700'
+                            : 'border-surface-200 hover:border-surface-300 text-surface-500'
+                        }`}
+                      >
+                        <Icon className="w-4 h-4" />
+                        <span className="text-xs">{info.label}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-surface-600 mb-1.5 block">标题</label>
+                <input
+                  className="input-base text-sm"
+                  placeholder="请输入标题，如：报价沟通、电话确认等"
+                  value={newFollowUp.title}
+                  onChange={(e) => setNewFollowUp({ ...newFollowUp, title: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-surface-600 mb-1.5 block">内容</label>
+                <textarea
+                  className="input-base text-sm min-h-[100px] resize-y"
+                  placeholder="记录跟进详情，方便下次接着聊..."
+                  value={newFollowUp.content}
+                  onChange={(e) => setNewFollowUp({ ...newFollowUp, content: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="px-5 py-4 bg-surface-50 border-t border-surface-100 flex justify-end gap-2">
+              <button
+                onClick={() => setShowAddModal(false)}
+                className="btn-secondary text-sm"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleAddFollowUp}
+                disabled={!newFollowUp.title.trim()}
+                className="btn-primary text-sm disabled:opacity-50"
+              >
+                保存记录
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

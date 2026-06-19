@@ -43,16 +43,7 @@ export default function ReminderPopup() {
   }, [hasFetched, reminders])
 
   const goOrder = (r: Reminder) => {
-    setSelectedClinic({
-      id: r.clinic_id,
-      name: r.clinic_name,
-      address: '',
-      area: '',
-      contact: '',
-      phone: '',
-    })
-    clearCart()
-    navigate('/order/new')
+    navigate(`/order/new?clinic_id=${encodeURIComponent(r.clinic_id)}&clinic_name=${encodeURIComponent(r.clinic_name)}&reminder_id=${encodeURIComponent(r.id)}`)
     setShow(false)
   }
 

@@ -85,7 +85,7 @@ export default function Reminders() {
                         <button onClick={() => handleStatus(r.id, 'done')} className="btn-primary text-xs px-3 py-1.5 flex items-center gap-1">
                           <Phone className="w-3 h-3" />已联系
                         </button>
-                        <button onClick={() => navigate('/order/new')} className="btn-accent text-xs px-3 py-1.5 flex items-center gap-1">
+                        <button onClick={() => navigate(`/order/new?clinic_id=${encodeURIComponent(r.clinic_id)}&clinic_name=${encodeURIComponent(r.clinic_name)}&reminder_id=${encodeURIComponent(r.id)}`)} className="btn-accent text-xs px-3 py-1.5 flex items-center gap-1">
                           <ShoppingCart className="w-3 h-3" />去下单
                         </button>
                         <button onClick={() => handleStatus(r.id, 'skipped')} className="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1">

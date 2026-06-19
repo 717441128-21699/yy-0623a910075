@@ -64,6 +64,19 @@ interface Reminder {
   remind_at: string
   status: 'pending' | 'done' | 'skipped'
   message: string
+  order_id?: string
+  suggested_quantity?: number
+}
+
+interface FollowUp {
+  id: string
+  clinic_id: string
+  type: 'call' | 'visit' | 'quote' | 'order' | 'note'
+  title: string
+  content: string
+  created_at: string
+  related_order_id?: string
+  operator?: string
 }
 
 interface GiftPolicy {
@@ -103,6 +116,7 @@ interface AppState {
   giftPolicies: GiftPolicy[]
   brandPreferences: BrandPreference[]
   recommendedProducts: RecommendedProduct[]
+  followUps: FollowUp[]
   cart: CartItem[]
   selectedClinic: Clinic | null
   loading: boolean
@@ -123,6 +137,8 @@ interface AppState {
       delivery_method?: 'logistics' | 'local_delivery' | 'self_pickup'
       backorder_note?: string
       payment_due_days?: number
+      from_reminder_id?: string
+      operator?: string
     },
   ) => Promise<Order | null>
   generateConfirmation: (
@@ -131,11 +147,22 @@ interface AppState {
       delivery_method?: 'logistics' | 'local_delivery' | 'self_pickup'
       backorder_note?: string
       payment_due_days?: number
+      version?: 'customer' | 'internal'
     },
   ) => Promise<string>
   fetchReminders: (status?: string) => Promise<void>
   fetchTodayReminders: () => Promise<void>
   updateReminderStatus: (id: string, status: string) => Promise<void>
+  fetchFollowUps: (clinicId: string) => Promise<void>
+  createFollowUp: (
+    clinicId: string,
+    data: {
+      type: FollowUp['type']
+      title: string
+      content: string
+      operator?: string
+    },
+  ) => Promise<FollowUp | null>
   fetchGiftPolicies: (productId?: string) => Promise<void>
   setSelectedClinic: (clinic: Clinic | null) => void
   addToCart: (product: Product, quantity: number) => void
@@ -165,6 +192,7 @@ export const useStore = create<AppState>((set, get) => ({
   giftPolicies: [],
   brandPreferences: [],
   recommendedProducts: [],
+  followUps: [],
   cart: [],
   selectedClinic: null,
   loading: false,
@@ -268,11 +296,18 @@ export const useStore = create<AppState>((set, get) => ({
 
   createOrder: async (clinicId, items, extras?) => {
     try {
-      const data = await apiFetch<Order>('/orders', {
+      const data = await apiFetch<Order & { backorder_items?: unknown[]; completed_reminder_ids?: string[] }>('/orders', {
         method: 'POST',
         body: JSON.stringify({ clinic_id: clinicId, items, ...extras }),
       })
       set((state) => ({ orders: [...state.orders, data] }))
+      // 订单创建后刷新提醒状态（关联提醒已自动完成）
+      const { fetchTodayReminders, fetchFollowUps } = get()
+      fetchTodayReminders()
+      fetchFollowUps(clinicId)
+      // 刷新产品库存
+      const { fetchProducts } = get()
+      fetchProducts()
       return data
     } catch {
       return null
@@ -350,6 +385,32 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
+  fetchFollowUps: async (clinicId) => {
+    try {
+      const data = await apiFetch<FollowUp[]>(`/follow-ups/${clinicId}`)
+      set({ followUps: data })
+    } catch {
+      set({ followUps: [] })
+    }
+  },
+
+  createFollowUp: async (clinicId, data) => {
+    try {
+      const result = await apiFetch<FollowUp>(`/follow-ups/${clinicId}`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      })
+      set((state) => ({
+        followUps: [result, ...state.followUps].sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+        ),
+      }))
+      return result
+    } catch {
+      return null
+    }
+  },
+
   fetchGiftPolicies: async (productId?) => {
     try {
       const params = new URLSearchParams()
@@ -382,4 +443,4 @@ export const useStore = create<AppState>((set, get) => ({
   },
 }))
 
-export type { Clinic, Product, OrderItem, Order, Reminder, GiftPolicy, BrandPreference, RecommendedProduct, CartItem }
+export type { Clinic, Product, OrderItem, Order, Reminder, FollowUp, GiftPolicy, BrandPreference, RecommendedProduct, CartItem }

@@ -16,6 +16,7 @@ import productRoutes from './routes/products.js'
 import orderRoutes from './routes/orders.js'
 import reminderRoutes from './routes/reminders.js'
 import giftPolicyRoutes from './routes/giftPolicies.js'
+import followUpRoutes from './routes/followUps.js'
 
 // for esm mode
 const __filename = fileURLToPath(import.meta.url)
@@ -38,6 +39,7 @@ app.use('/api/products', productRoutes)
 app.use('/api/orders', orderRoutes)
 app.use('/api/reminders', reminderRoutes)
 app.use('/api/gift-policies', giftPolicyRoutes)
+app.use('/api/follow-ups', followUpRoutes)
 
 /**
  * health

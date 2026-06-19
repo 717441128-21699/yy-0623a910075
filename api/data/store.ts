@@ -68,6 +68,19 @@ export interface Reminder {
   remind_at: string
   status: 'pending' | 'done' | 'skipped'
   message: string
+  order_id?: string
+  suggested_quantity?: number
+}
+
+export interface FollowUp {
+  id: string
+  clinic_id: string
+  type: 'call' | 'visit' | 'quote' | 'order' | 'note'
+  title: string
+  content: string
+  created_at: string
+  related_order_id?: string
+  operator?: string
 }
 
 export interface GiftPolicy {
@@ -279,3 +292,34 @@ export const giftPolicies: GiftPolicy[] = [
   { id: 'gp-004', product_id: 'prod-025', product_name: '光固化复合树脂', threshold: 10, gift_product_id: 'prod-028', gift_product_name: '氧化锌暂封材', gift_quantity: 2, description: '买10支Z350树脂赠送2支氧化锌暂封材' },
   { id: 'gp-005', product_id: 'prod-001', product_name: '瑞士ITI种植体', threshold: 20, gift_product_id: 'prod-005', gift_product_name: '海奥生物膜', gift_quantity: 2, description: '买20颗ITI种植体赠送2片海奥生物膜' },
 ]
+
+export const followUps: FollowUp[] = [
+  { id: 'fu-001', clinic_id: 'clinic-001', type: 'call', title: '电话回访', content: '张主任反馈上个月的种植体使用良好，下周有3颗种植手术，考虑补一些ITI种植体。', created_at: '2026-06-18T10:30:00', operator: '李明' },
+  { id: 'fu-002', clinic_id: 'clinic-001', type: 'quote', title: '报价单发送', content: '已发送ITI种植体+骨粉的组合报价，优惠后92折。', created_at: '2026-06-16T15:20:00', operator: '李明', related_order_id: 'ord-001' },
+  { id: 'fu-003', clinic_id: 'clinic-001', type: 'order', title: '订单创建', content: '碧兰麻5盒 + 丁腈手套20盒 + ITI种植体10颗，合计¥24,420', created_at: '2026-05-10T14:00:00', operator: '李明', related_order_id: 'ord-001' },
+  { id: 'fu-004', clinic_id: 'clinic-002', type: 'visit', title: '上门拜访', content: '王院长在店，聊了下ProTaper Gold根管锉的价格，对比了竞品，表示下次补货优先考虑我们。', created_at: '2026-06-15T11:00:00', operator: '李明' },
+  { id: 'fu-005', clinic_id: 'clinic-003', type: 'call', title: '电话跟单', content: '刘医生确认了托槽订单，周内付款。顺便提到下个月有10个新正畸病例。', created_at: '2026-06-17T09:45:00', operator: '李明' },
+  { id: 'fu-006', clinic_id: 'clinic-004', type: 'order', title: '订单创建', content: '奥齿泰种植体20颗 + 碧兰麻4盒 + 骨粉5瓶，合计¥27,440', created_at: '2026-06-10T11:30:00', operator: '李明', related_order_id: 'ord-004' },
+  { id: 'fu-007', clinic_id: 'clinic-005', type: 'note', title: '备注', content: '陈护士对价格敏感，每次订货都要比对3家，建议下次带些样品过去。', created_at: '2026-06-12T16:00:00', operator: '李明' },
+  { id: 'fu-008', clinic_id: 'clinic-006', type: 'quote', title: '根管耗材报价', content: '发送了镍钛根管锉、根管封闭剂、牙胶尖的组合报价，张医生说下周给回复。', created_at: '2026-06-19T10:15:00', operator: '李明' },
+  { id: 'fu-009', clinic_id: 'clinic-007', type: 'visit', title: '初次拜访', content: '赵院长表示目前有固定供应商，但对我们的麻药价格感兴趣，留了样和名片。', created_at: '2026-06-14T14:30:00', operator: '李明' },
+]
+
+// 调整部分产品库存，制造一些欠货场景
+function adjustStocks() {
+  const stockMap: Record<string, number> = {
+    'prod-001': 8,
+    'prod-029': 12,
+    'prod-016': 50,
+    'prod-021': 3,
+    'prod-022': 5,
+    'prod-007': 2,
+    'prod-011': 4,
+  }
+  for (const p of products) {
+    if (stockMap[p.id] !== undefined) {
+      p.stock = stockMap[p.id]
+    }
+  }
+}
+adjustStocks()

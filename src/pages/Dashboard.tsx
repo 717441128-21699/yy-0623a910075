@@ -100,7 +100,7 @@ export default function Dashboard() {
                       </button>
                       <button
                         className="btn-accent text-xs px-3 py-1.5 flex items-center gap-1"
-                        onClick={() => navigate('/order/new')}
+                        onClick={() => navigate(`/order/new?clinic_id=${encodeURIComponent(r.clinic_id)}&clinic_name=${encodeURIComponent(r.clinic_name)}&reminder_id=${encodeURIComponent(r.id)}`)}
                       >
                         <ShoppingCart className="w-3.5 h-3.5" /> 下单
                       </button>
