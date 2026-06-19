@@ -39,6 +39,38 @@ interface OrderItem {
   tax_rate: number
   subtotal: number
   gifted: boolean
+  shipped_quantity?: number
+  backorder_quantity?: number
+}
+
+interface ShipmentItem {
+  id: string
+  order_item_id: string
+  product_id: string
+  product_name: string
+  shipped_quantity: number
+  unit: string
+}
+
+interface Shipment {
+  id: string
+  order_id: string
+  created_at: string
+  shipped_by: string
+  tracking_no?: string
+  carrier?: string
+  expected_arrival?: string
+  items: ShipmentItem[]
+  note?: string
+}
+
+interface BackorderInfo {
+  product_id: string
+  product_name: string
+  quantity: number
+  shipped: number
+  backorder: number
+  unit: string
 }
 
 interface Order {
@@ -53,6 +85,26 @@ interface Order {
   backorder_note?: string
   payment_due_days?: number
   payment_due_date?: string
+  expected_arrival?: string
+  shipments?: Shipment[]
+  total_ordered_qty?: number
+  total_shipped_qty?: number
+  shipment_progress_pct?: number
+  backorder_items?: BackorderInfo[]
+  latest_tracking_no?: string
+  latest_carrier?: string
+  latest_expected_arrival?: string
+}
+
+interface DraftOrder {
+  id: string
+  clinic_id: string
+  clinic_name?: string
+  items: { product_id: string; product_name?: string; quantity: number }[]
+  note?: string
+  created_at: string
+  updated_at: string
+  created_by?: string
 }
 
 interface Reminder {
@@ -71,7 +123,7 @@ interface Reminder {
 interface FollowUp {
   id: string
   clinic_id: string
-  type: 'call' | 'visit' | 'quote' | 'order' | 'note'
+  type: 'call' | 'visit' | 'quote' | 'order' | 'note' | 'shipment'
   title: string
   content: string
   created_at: string
@@ -117,6 +169,7 @@ interface AppState {
   brandPreferences: BrandPreference[]
   recommendedProducts: RecommendedProduct[]
   followUps: FollowUp[]
+  drafts: DraftOrder[]
   cart: CartItem[]
   selectedClinic: Clinic | null
   loading: boolean
@@ -150,6 +203,17 @@ interface AppState {
       version?: 'customer' | 'internal'
     },
   ) => Promise<string>
+  shipOrder: (
+    orderId: string,
+    data: {
+      items: ShipmentItem[]
+      tracking_no?: string
+      carrier?: string
+      expected_arrival?: string
+      note?: string
+      shipped_by?: string
+    },
+  ) => Promise<Shipment | null>
   fetchReminders: (status?: string) => Promise<void>
   fetchTodayReminders: () => Promise<void>
   updateReminderStatus: (id: string, status: string) => Promise<void>
@@ -163,6 +227,29 @@ interface AppState {
       operator?: string
     },
   ) => Promise<FollowUp | null>
+  fetchDrafts: (clinicId?: string) => Promise<void>
+  createDraft: (data: {
+    clinic_id: string
+    clinic_name?: string
+    items: { product_id: string; product_name?: string; quantity: number }[]
+    note?: string
+    created_by?: string
+  }) => Promise<DraftOrder | null>
+  updateDraft: (
+    id: string,
+    data: Partial<Pick<DraftOrder, 'items' | 'note' | 'clinic_id' | 'clinic_name'>>,
+  ) => Promise<DraftOrder | null>
+  deleteDraft: (id: string) => Promise<boolean>
+  submitDraft: (
+    id: string,
+    extras?: {
+      delivery_method?: 'logistics' | 'local_delivery' | 'self_pickup'
+      backorder_note?: string
+      payment_due_days?: number
+      from_reminder_id?: string
+      operator?: string
+    },
+  ) => Promise<Order | null>
   fetchGiftPolicies: (productId?: string) => Promise<void>
   setSelectedClinic: (clinic: Clinic | null) => void
   addToCart: (product: Product, quantity: number) => void
@@ -193,6 +280,7 @@ export const useStore = create<AppState>((set, get) => ({
   brandPreferences: [],
   recommendedProducts: [],
   followUps: [],
+  drafts: [],
   cart: [],
   selectedClinic: null,
   loading: false,
@@ -320,9 +408,33 @@ export const useStore = create<AppState>((set, get) => ({
         method: 'POST',
         body: JSON.stringify(extras || {}),
       })
+      // 生成确认单后刷新跟进记录（后端会自动生成 quote 类型记录）
+      const order = get().orders.find((o) => o.id === orderId)
+      if (order) {
+        const { fetchFollowUps } = get()
+        fetchFollowUps(order.clinic_id)
+      }
       return data.confirmation_text
     } catch {
       return ''
+    }
+  },
+
+  shipOrder: async (orderId, data) => {
+    try {
+      const result = await apiFetch<Shipment>(`/orders/${orderId}/ship`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      })
+      // 刷新订单和跟进记录
+      const { fetchOrders, fetchFollowUps, fetchOrder } = get()
+      fetchOrders()
+      const order = await fetchOrder(orderId)
+      if (order) fetchFollowUps(order.clinic_id)
+      return result
+    } catch (e) {
+      console.error(e)
+      return null
     }
   },
 
@@ -411,6 +523,76 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
+  fetchDrafts: async (clinicId?) => {
+    try {
+      const params = new URLSearchParams()
+      if (clinicId) params.set('clinic_id', clinicId)
+      const data = await apiFetch<DraftOrder[]>(`/drafts?${params.toString()}`)
+      set({ drafts: data })
+    } catch {
+      set({ drafts: [] })
+    }
+  },
+
+  createDraft: async (data) => {
+    try {
+      const result = await apiFetch<DraftOrder>('/drafts', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      })
+      set((state) => ({ drafts: [result, ...state.drafts] }))
+      return result
+    } catch {
+      return null
+    }
+  },
+
+  updateDraft: async (id, data) => {
+    try {
+      const result = await apiFetch<DraftOrder>(`/drafts/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      })
+      set((state) => ({
+        drafts: state.drafts.map((d) => (d.id === id ? result : d)),
+      }))
+      return result
+    } catch {
+      return null
+    }
+  },
+
+  deleteDraft: async (id) => {
+    try {
+      await apiFetch<DraftOrder>(`/drafts/${id}`, { method: 'DELETE' })
+      set((state) => ({ drafts: state.drafts.filter((d) => d.id !== id) }))
+      return true
+    } catch {
+      return false
+    }
+  },
+
+  submitDraft: async (id, extras?) => {
+    try {
+      const result = await apiFetch<{ order: Order; backorder_items?: unknown[] }>(`/drafts/${id}/submit`, {
+        method: 'POST',
+        body: JSON.stringify(extras || {}),
+      })
+      set((state) => ({
+        orders: [...state.orders, result.order],
+        drafts: state.drafts.filter((d) => d.id !== id),
+      }))
+      // 刷新提醒、跟进、产品库存
+      const { fetchTodayReminders, fetchFollowUps, fetchProducts } = get()
+      fetchTodayReminders()
+      if (result.order.clinic_id) fetchFollowUps(result.order.clinic_id)
+      fetchProducts()
+      return result.order
+    } catch {
+      return null
+    }
+  },
+
   fetchGiftPolicies: async (productId?) => {
     try {
       const params = new URLSearchParams()
@@ -443,4 +625,4 @@ export const useStore = create<AppState>((set, get) => ({
   },
 }))
 
-export type { Clinic, Product, OrderItem, Order, Reminder, FollowUp, GiftPolicy, BrandPreference, RecommendedProduct, CartItem }
+export type { Clinic, Product, OrderItem, Order, Shipment, ShipmentItem, Reminder, FollowUp, GiftPolicy, BrandPreference, RecommendedProduct, CartItem, DraftOrder, BackorderInfo }

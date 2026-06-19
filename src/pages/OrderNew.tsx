@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Search, Plus, Minus, X, ShoppingCart, Stethoscope, Sparkles, Gift, CheckCircle, AlertTriangle, Lightbulb, Package } from 'lucide-react'
-import { useStore, type Reminder } from '@/store/useStore'
+import { Search, Plus, Minus, X, ShoppingCart, Stethoscope, Sparkles, Gift, CheckCircle, AlertTriangle, Lightbulb, Package, Save, FolderOpen, Trash2 } from 'lucide-react'
+import { useStore, type Reminder, type DraftOrder } from '@/store/useStore'
 
 export default function OrderNew() {
   const navigate = useNavigate()
@@ -13,6 +13,8 @@ export default function OrderNew() {
     reminders, fetchTodayReminders,
     cart, addToCart, updateCartItemQuantity, removeFromCart, clearCart,
     applyGiftPoliciesToCart, selectedClinic, setSelectedClinic, createOrder,
+    // 草稿相关状态和方法
+    drafts, fetchDrafts, createDraft, deleteDraft,
   } = useStore()
 
   const [clinicSearch, setClinicSearch] = useState('')
@@ -23,6 +25,11 @@ export default function OrderNew() {
   const [productSearch, setProductSearch] = useState('')
   const [addingId, setAddingId] = useState<string | null>(null)
   const [addQty, setAddQty] = useState(1)
+  // 草稿功能相关状态
+  const [showSaveDraftModal, setShowSaveDraftModal] = useState(false) // 保存草稿弹窗
+  const [showOpenDraftModal, setShowOpenDraftModal] = useState(false) // 打开草稿弹窗
+  const [draftNote, setDraftNote] = useState('') // 草稿备注
+  const [deletingDraftId, setDeletingDraftId] = useState<string | null>(null) // 删除中草稿ID
 
   const urlClinicId = searchParams.get('clinic_id')
   const urlClinicName = searchParams.get('clinic_name')
@@ -31,6 +38,8 @@ export default function OrderNew() {
   useEffect(() => { fetchClinics() }, [])
   useEffect(() => { fetchGiftPolicies() }, [])
   useEffect(() => { fetchProducts() }, [])
+  // 初始加载草稿列表
+  useEffect(() => { fetchDrafts() }, [])
   useEffect(() => {
     if (urlReminderId) fetchTodayReminders()
   }, [urlReminderId])
@@ -130,6 +139,102 @@ export default function OrderNew() {
     }
   }
 
+  // ========== 草稿功能处理函数 ==========
+
+  // 打开保存草稿弹窗时重置备注
+  const openSaveDraftModal = () => {
+    setDraftNote('')
+    setShowSaveDraftModal(true)
+  }
+
+  // 保存草稿处理
+  const handleSaveDraft = async () => {
+    if (!selectedClinic || cart.length === 0) return
+    // 构造草稿 items 数据
+    const draftItems = cart.map(i => ({
+      product_id: i.product.id,
+      product_name: i.product.name,
+      quantity: i.quantity,
+    }))
+    // 调用 createDraft 创建草稿
+    const result = await createDraft({
+      clinic_id: selectedClinic.id,
+      clinic_name: selectedClinic.name,
+      items: draftItems,
+      note: draftNote.trim() || undefined,
+      created_by: '李明',
+    })
+    if (result) {
+      alert('草稿保存成功！')
+      setShowSaveDraftModal(false)
+      // 保存成功后清空购物车和选中诊所
+      clearCart()
+    } else {
+      alert('草稿保存失败，请重试')
+    }
+  }
+
+  // 继续编辑草稿
+  const handleLoadDraft = async (draft: DraftOrder) => {
+    // 确保产品数据已加载
+    if (products.length === 0) {
+      await fetchProducts()
+    }
+    // 设置选中诊所
+    const clinic = clinics.find(c => c.id === draft.clinic_id)
+    if (clinic) {
+      setSelectedClinic(clinic)
+    } else {
+      // 找不到诊所时用草稿数据构造
+      setSelectedClinic({
+        id: draft.clinic_id,
+        name: draft.clinic_name || '',
+        address: '',
+        area: '',
+        contact: '',
+        phone: '',
+      })
+    }
+    // 清空当前购物车
+    clearCart()
+    // 将草稿 items 逐个加入购物车
+    for (const item of draft.items) {
+      const product = products.find(p => p.id === item.product_id)
+      if (product) {
+        addToCart(product, item.quantity)
+      }
+    }
+    // 关闭弹窗
+    setShowOpenDraftModal(false)
+  }
+
+  // 删除草稿
+  const handleDeleteDraft = async (id: string) => {
+    if (!confirm('确定要删除此草稿吗？删除后无法恢复。')) return
+    setDeletingDraftId(id)
+    const success = await deleteDraft(id)
+    setDeletingDraftId(null)
+    if (!success) {
+      alert('删除失败，请重试')
+    }
+  }
+
+  // 格式化日期时间显示
+  const formatDraftDateTime = (isoStr: string) => {
+    const d = new Date(isoStr)
+    return d.toLocaleString('zh-CN', {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  }
+
+  // 计算草稿品项总数
+  const getDraftTotalItems = (draft: DraftOrder) => {
+    return draft.items.reduce((sum, i) => sum + i.quantity, 0)
+  }
+
   const decQty = (pid: string, cur: number) => {
     if (cur <= 1) return
     updateCartItemQuantity(pid, cur - 1)
@@ -161,6 +266,25 @@ export default function OrderNew() {
       <div className="grid grid-cols-12 gap-5 h-[calc(100%-3rem)]">
         {/* Left: Scene Selection */}
         <div className="col-span-4 flex flex-col gap-4 overflow-y-auto pr-1">
+          {/* 草稿操作按钮区 */}
+          <div className="flex gap-2">
+            {/* 保存为草稿按钮：诊所已选且购物车有商品时才可点击 */}
+            <button
+              onClick={openSaveDraftModal}
+              disabled={!selectedClinic || cart.length === 0}
+              className="btn-secondary flex-1 text-sm flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Save className="w-4 h-4" /> 保存为草稿
+            </button>
+            {/* 打开草稿按钮：始终可点击 */}
+            <button
+              onClick={() => setShowOpenDraftModal(true)}
+              className="btn-secondary flex-1 text-sm flex items-center justify-center gap-1.5"
+            >
+              <FolderOpen className="w-4 h-4" /> 打开草稿
+            </button>
+          </div>
+
           {/* Clinic Selector */}
           <div className="relative">
             <label className="text-sm font-medium text-surface-600 mb-1 block">选择诊所</label>
@@ -452,6 +576,158 @@ export default function OrderNew() {
           </div>
         </div>
       </div>
+
+      {/* ========== 保存草稿 Modal ========== */}
+      {showSaveDraftModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md m-4 overflow-hidden">
+            <div className="px-5 py-4 border-b border-surface-100 flex items-center justify-between">
+              <h3 className="font-semibold text-surface-900 flex items-center gap-2">
+                <Save className="w-4 h-4 text-dental-500" /> 保存为草稿
+              </h3>
+              <button
+                onClick={() => setShowSaveDraftModal(false)}
+                className="w-8 h-8 rounded-lg hover:bg-surface-100 flex items-center justify-center"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              {/* 草稿摘要信息 */}
+              <div className="bg-surface-50 rounded-lg p-3 space-y-1.5 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-surface-400">诊所</span>
+                  <span className="font-medium text-surface-800">{selectedClinic?.name}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-surface-400">品项数</span>
+                  <span className="font-medium text-surface-800">{cart.length} 种 / 共 {totalItems} 件</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-surface-400">合计金额</span>
+                  <span className="font-semibold text-dental-600">¥{totalAmount.toFixed(2)}</span>
+                </div>
+              </div>
+              {/* 备注输入 */}
+              <div>
+                <label className="text-sm font-medium text-surface-600 mb-1.5 block">备注（可选）</label>
+                <textarea
+                  className="input-base text-sm min-h-[80px] resize-y"
+                  placeholder="输入草稿备注，方便后续识别..."
+                  value={draftNote}
+                  onChange={(e) => setDraftNote(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="px-5 py-4 bg-surface-50 border-t border-surface-100 flex justify-end gap-2">
+              <button
+                onClick={() => setShowSaveDraftModal(false)}
+                className="btn-secondary text-sm"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleSaveDraft}
+                className="btn-primary text-sm flex items-center gap-1.5"
+              >
+                <Save className="w-4 h-4" /> 确认保存
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========== 打开草稿 Modal ========== */}
+      {showOpenDraftModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl m-4 overflow-hidden flex flex-col max-h-[80vh]">
+            <div className="px-5 py-4 border-b border-surface-100 flex items-center justify-between flex-shrink-0">
+              <h3 className="font-semibold text-surface-900 flex items-center gap-2">
+                <FolderOpen className="w-4 h-4 text-dental-500" /> 草稿列表
+                <span className="text-xs font-normal text-surface-400">共 {drafts.length} 条</span>
+              </h3>
+              <button
+                onClick={() => setShowOpenDraftModal(false)}
+                className="w-8 h-8 rounded-lg hover:bg-surface-100 flex items-center justify-center"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4">
+              {drafts.length === 0 ? (
+                <div className="text-center py-16 text-surface-400">
+                  <FolderOpen className="w-10 h-10 mx-auto mb-2 opacity-40" />
+                  <p className="text-sm">暂无草稿</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {drafts.map((draft) => (
+                    <div
+                      key={draft.id}
+                      className="bg-white border border-surface-200 rounded-lg p-4 card-hover"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          {/* 诊所名和品项数 */}
+                          <div className="flex items-center gap-2 flex-wrap mb-1">
+                            <span className="text-sm font-semibold text-surface-900">
+                              {draft.clinic_name || draft.clinic_id}
+                            </span>
+                            <span className="text-[11px] px-2 py-0.5 rounded-full bg-dental-50 text-dental-600 border border-dental-200">
+                              {draft.items.length} 种 / {getDraftTotalItems(draft)} 件
+                            </span>
+                          </div>
+                          {/* 时间 */}
+                          <div className="text-xs text-surface-400 flex items-center gap-3">
+                            <span>创建：{formatDraftDateTime(draft.created_at)}</span>
+                            {draft.updated_at !== draft.created_at && (
+                              <span>更新：{formatDraftDateTime(draft.updated_at)}</span>
+                            )}
+                            {draft.created_by && (
+                              <span>创建人：{draft.created_by}</span>
+                            )}
+                          </div>
+                          {/* 备注 */}
+                          {draft.note && (
+                            <p className="text-xs text-surface-500 mt-2 bg-surface-50 rounded px-2 py-1.5 border border-surface-100">
+                              📝 {draft.note}
+                            </p>
+                          )}
+                        </div>
+                        {/* 操作按钮 */}
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <button
+                            onClick={() => handleLoadDraft(draft)}
+                            className="btn-primary text-xs px-3 py-1.5 flex items-center gap-1"
+                          >
+                            <Plus className="w-3 h-3" /> 继续编辑
+                          </button>
+                          <button
+                            onClick={() => handleDeleteDraft(draft.id)}
+                            disabled={deletingDraftId === draft.id}
+                            className="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1 text-red-600 hover:bg-red-50 disabled:opacity-50"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            {deletingDraftId === draft.id ? '删除中' : '删除'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="px-5 py-3 bg-surface-50 border-t border-surface-100 flex justify-end flex-shrink-0">
+              <button
+                onClick={() => setShowOpenDraftModal(false)}
+                className="btn-secondary text-sm"
+              >
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

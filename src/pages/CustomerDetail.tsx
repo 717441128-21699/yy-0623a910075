@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { MapPin, Phone, User, ShoppingCart, Calendar, Package, MessageSquare, PhoneCall, Home, FileText, Plus, X, Clock } from 'lucide-react'
+import { MapPin, Phone, User, ShoppingCart, Calendar, Package, MessageSquare, PhoneCall, Home, FileText, Plus, X, Clock, Truck, ExternalLink } from 'lucide-react'
 import { useStore } from '@/store/useStore'
 import type { Clinic, Product, BrandPreference, Order, FollowUp } from '@/store/useStore'
 
@@ -64,12 +64,15 @@ export default function CustomerDetail() {
 
   const maxBrandCount = Math.max(...brands.map((b) => b.purchase_count), 1)
 
+  // 跟进记录类型配置映射，包含 shipment 运输类型
   const followUpTypeMap: Record<FollowUp['type'], { label: string; icon: typeof MessageSquare; color: string; bg: string }> = {
     call: { label: '电话', icon: PhoneCall, color: 'text-dental-600', bg: 'bg-dental-100' },
     visit: { label: '上门拜访', icon: Home, color: 'text-emerald-600', bg: 'bg-emerald-100' },
     quote: { label: '报价', icon: FileText, color: 'text-amber-600', bg: 'bg-amber-100' },
     order: { label: '下单', icon: ShoppingCart, color: 'text-accent-600', bg: 'bg-accent-100' },
     note: { label: '备注', icon: MessageSquare, color: 'text-surface-600', bg: 'bg-surface-100' },
+    // 运输/发货类型，使用 Truck 图标，蓝色/青色系配色
+    shipment: { label: '已发货', icon: Truck, color: 'text-cyan-600', bg: 'bg-cyan-100' },
   }
 
   const handleAddFollowUp = async () => {
@@ -255,6 +258,10 @@ export default function CustomerDetail() {
                 {followUps.map((fu) => {
                   const typeInfo = followUpTypeMap[fu.type]
                   const TypeIcon = typeInfo.icon
+                  // 判断当前类型是否支持点击跳转订单详情
+                  const canClickTitle = (fu.type === 'order' || fu.type === 'quote' || fu.type === 'shipment') && fu.related_order_id
+                  // 订单详情跳转链接，履约跟踪Tab
+                  const orderFulfillmentUrl = fu.related_order_id ? `/order/confirm/${fu.related_order_id}?tab=fulfillment` : null
                   return (
                     <div key={fu.id} className="relative">
                       <div className={`absolute -left-6 top-1.5 w-4 h-4 rounded-full ${typeInfo.bg} border-2 border-white shadow flex items-center justify-center`}>
@@ -262,11 +269,22 @@ export default function CustomerDetail() {
                       </div>
                       <div className="bg-white rounded-xl border border-surface-200 p-4 card-hover">
                         <div className="flex items-start justify-between gap-2">
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${typeInfo.bg} ${typeInfo.color}`}>
                               {typeInfo.label}
                             </span>
-                            <span className="text-sm font-medium text-surface-800">{fu.title}</span>
+                            {canClickTitle ? (
+                              // 订单/报价/发货类型的标题可点击跳转订单详情
+                              <button
+                                onClick={() => navigate(orderFulfillmentUrl!)}
+                                className="text-sm font-medium text-dental-600 hover:text-dental-700 hover:underline inline-flex items-center gap-1"
+                              >
+                                {fu.title}
+                                <ExternalLink className="w-3 h-3" />
+                              </button>
+                            ) : (
+                              <span className="text-sm font-medium text-surface-800">{fu.title}</span>
+                            )}
                           </div>
                           <div className="flex items-center gap-1 text-xs text-surface-400 flex-shrink-0">
                             <Clock className="w-3 h-3" />
@@ -276,7 +294,15 @@ export default function CustomerDetail() {
                         <p className="text-sm text-surface-600 mt-2 leading-relaxed">{fu.content}</p>
                         {fu.related_order_id && (
                           <div className="mt-2 text-xs text-surface-400">
-                            关联订单：<span className="font-mono text-dental-600">{fu.related_order_id}</span>
+                            关联订单：
+                            {/* 关联订单ID改为可点击链接，跳转到履约跟踪Tab */}
+                            <button
+                              onClick={() => navigate(orderFulfillmentUrl!)}
+                              className="font-mono text-dental-600 hover:text-dental-700 hover:underline inline-flex items-center gap-0.5"
+                            >
+                              {fu.related_order_id}
+                              <ExternalLink className="w-3 h-3" />
+                            </button>
                           </div>
                         )}
                         {fu.operator && (
@@ -309,7 +335,8 @@ export default function CustomerDetail() {
             <div className="p-5 space-y-4">
               <div>
                 <label className="text-sm font-medium text-surface-600 mb-2 block">跟进类型</label>
-                <div className="grid grid-cols-5 gap-2">
+                {/* 跟进类型选择按钮，6列布局，支持 shipment 类型 */}
+                <div className="grid grid-cols-6 gap-2">
                   {(Object.keys(followUpTypeMap) as FollowUp['type'][]).map((type) => {
                     const info = followUpTypeMap[type]
                     const Icon = info.icon

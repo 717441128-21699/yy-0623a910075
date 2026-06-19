@@ -32,7 +32,7 @@ router.post('/:clinicId', (req: Request, res: Response): void => {
     related_order_id?: string
   }
 
-  if (!type || !['call', 'visit', 'quote', 'order', 'note'].includes(type)) {
+  if (!type || !['call', 'visit', 'quote', 'order', 'note', 'shipment'].includes(type)) {
     res.status(400).json({ success: false, error: '跟进类型无效' })
     return
   }

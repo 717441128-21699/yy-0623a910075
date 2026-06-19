@@ -4,6 +4,7 @@ import {
   LayoutDashboard,
   Users,
   ShoppingCart,
+  Package,
   Bell,
   Cross,
   ChevronLeft,
@@ -15,6 +16,7 @@ import { useStore } from '@/store/useStore'
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: '工作台' },
   { to: '/customers', icon: Users, label: '客户档案' },
+  { to: '/orders', icon: Package, label: '订单管理' },
   { to: '/order/new', icon: ShoppingCart, label: '下单中心' },
   { to: '/reminders', icon: Bell, label: '回访提醒' },
 ]

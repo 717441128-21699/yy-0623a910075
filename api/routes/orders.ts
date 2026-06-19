@@ -7,10 +7,13 @@ import {
   reminders,
   giftPolicies,
   followUps,
+  shipments,
   genOrderId,
   randomUUID,
   type Order,
   type OrderItem,
+  type Shipment,
+  type ShipmentItem,
 } from '../data/store.js'
 
 const router = Router()
@@ -23,7 +26,52 @@ router.get('/', (req: Request, res: Response): void => {
     result = result.filter((o) => o.clinic_id === clinic_id)
   }
 
-  res.json({ success: true, data: result })
+  // 给每个订单附带发货进度统计
+  const enriched = result.map((o) => {
+    const orderShipments = shipments.filter((s) => s.order_id === o.id)
+    const shippedMap: Record<string, number> = {}
+    for (const s of orderShipments) {
+      for (const si of s.items) {
+        shippedMap[si.product_id] = (shippedMap[si.product_id] || 0) + si.shipped_quantity
+      }
+    }
+    let totalOrderedQty = 0
+    let totalShippedQty = 0
+    const backorderItems: { product_id: string; product_name: string; quantity: number; shipped: number; backorder: number; unit: string }[] = []
+    for (const item of o.items) {
+      if (item.gifted) continue
+      totalOrderedQty += item.quantity
+      const shipped = shippedMap[item.product_id] || 0
+      totalShippedQty += shipped
+      const back = item.quantity - shipped
+      if (back > 0) {
+        backorderItems.push({
+          product_id: item.product_id,
+          product_name: item.product_name,
+          quantity: item.quantity,
+          shipped,
+          backorder: back,
+          unit: item.unit,
+        })
+      }
+    }
+    const latestShipment = orderShipments.length > 0
+      ? orderShipments.reduce((a, b) => (new Date(a.created_at) > new Date(b.created_at) ? a : b))
+      : null
+    return {
+      ...o,
+      shipments: orderShipments,
+      total_ordered_qty: totalOrderedQty,
+      total_shipped_qty: totalShippedQty,
+      shipment_progress_pct: totalOrderedQty > 0 ? Math.round((totalShippedQty / totalOrderedQty) * 100) : 0,
+      backorder_items: backorderItems,
+      latest_tracking_no: latestShipment?.tracking_no,
+      latest_carrier: latestShipment?.carrier,
+      latest_expected_arrival: latestShipment?.expected_arrival || o.expected_arrival,
+    }
+  })
+
+  res.json({ success: true, data: enriched })
 })
 
 router.get('/:id', (req: Request, res: Response): void => {
@@ -32,7 +80,35 @@ router.get('/:id', (req: Request, res: Response): void => {
     res.status(404).json({ success: false, error: '订单不存在' })
     return
   }
-  res.json({ success: true, data: order })
+
+  const orderShipments = shipments.filter((s) => s.order_id === order.id).sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  )
+  const shippedMap: Record<string, number> = {}
+  for (const s of orderShipments) {
+    for (const si of s.items) {
+      shippedMap[si.product_id] = (shippedMap[si.product_id] || 0) + si.shipped_quantity
+    }
+  }
+
+  const itemsWithShip = order.items.map((item) => {
+    const shipped = shippedMap[item.product_id] || 0
+    return {
+      ...item,
+      shipped_quantity: shipped,
+      backorder_quantity: item.gifted ? 0 : Math.max(0, item.quantity - shipped),
+    }
+  })
+
+  res.json({
+    success: true,
+    data: {
+      ...order,
+      shipments: orderShipments,
+      items: itemsWithShip,
+      expected_arrival: order.expected_arrival,
+    },
+  })
 })
 
 router.post('/', (req: Request, res: Response): void => {
@@ -400,6 +476,17 @@ router.post('/:id/confirm', (req: Request, res: Response): void => {
     text += `\n${thinDivider}\n`
     text += `合计金额：¥${order.total_amount.toFixed(2)}（含税）\n\n`
     text += `配送方式：${deliveryLabel[effectiveDelivery || 'logistics'] || '物流配送'}\n`
+    if (effectiveBackorder && effectiveBackorder.trim()) {
+      text += `发货说明：\n`
+      const backorderEntries = effectiveBackorder.trim().split(/[；;]/).filter(s => s.trim())
+      for (const entry of backorderEntries) {
+        const cleaned = entry.replace(/欠货/g, '').trim()
+        if (cleaned) {
+          text += `  · ${cleaned} 稍后补发\n`
+        }
+      }
+      text += `  （有库存商品将优先发出）\n`
+    }
     text += `付款期限：下单后${effectiveDueDays}天\n`
     text += `到期日期：${effectiveDueDate}\n\n`
     text += `${divider}\n`
@@ -407,7 +494,173 @@ router.post('/:id/confirm', (req: Request, res: Response): void => {
     text += `${divider}\n`
   }
 
+  // 自动生成报价类型的跟进记录
+  const existingQuoteCount = followUps.filter(
+    (f) => f.related_order_id === order.id && f.type === 'quote'
+  ).length
+  if (existingQuoteCount === 0) {
+    const versionLabel = version === 'internal' ? '（内部版）' : ''
+    followUps.push({
+      id: randomUUID(),
+      clinic_id: order.clinic_id,
+      type: 'quote',
+      title: `生成报价确认单${versionLabel}`,
+      content: `配送：${deliveryLabel[effectiveDelivery || 'logistics'] || '物流配送'}；付款期限：下单后${effectiveDueDays}天；到期：${effectiveDueDate}${
+        effectiveBackorder?.trim() ? `；欠货：${effectiveBackorder.trim()}` : ''
+      }`,
+      created_at: new Date().toISOString(),
+      related_order_id: order.id,
+      operator: '李明',
+    })
+  }
+
   res.json({ success: true, data: { confirmation_text: text } })
+})
+
+// 新增发货记录
+router.post('/:id/ship', (req: Request, res: Response): void => {
+  const order = orders.find((o) => o.id === req.params.id)
+  if (!order) {
+    res.status(404).json({ success: false, error: '订单不存在' })
+    return
+  }
+
+  const {
+    items,
+    tracking_no,
+    carrier,
+    expected_arrival,
+    note,
+    shipped_by = '李明',
+  } = req.body as {
+    items: { order_item_id: string; product_id: string; product_name: string; shipped_quantity: number; unit: string }[]
+    tracking_no?: string
+    carrier?: string
+    expected_arrival?: string
+    note?: string
+    shipped_by?: string
+  }
+
+  if (!items || items.length === 0) {
+    res.status(400).json({ success: false, error: '请填写发货明细' })
+    return
+  }
+
+  // 校验：不能超出未发货数量
+  const shippedMap: Record<string, number> = {}
+  const orderShipments = shipments.filter((s) => s.order_id === order.id)
+  for (const s of orderShipments) {
+    for (const si of s.items) {
+      shippedMap[si.order_item_id] = (shippedMap[si.order_item_id] || 0) + si.shipped_quantity
+    }
+  }
+
+  for (const si of items) {
+    const orderItem = order.items.find((i) => i.id === si.order_item_id)
+    if (!orderItem) {
+      res.status(400).json({ success: false, error: `订单项 ${si.order_item_id} 不存在` })
+      return
+    }
+    const alreadyShipped = shippedMap[si.order_item_id] || 0
+    if (alreadyShipped + si.shipped_quantity > orderItem.quantity) {
+      res.status(400).json({
+        success: false,
+        error: `${orderItem.product_name} 发货数量超出未发数量（未发 ${orderItem.quantity - alreadyShipped}${orderItem.unit}）`,
+      })
+      return
+    }
+  }
+
+  // 创建发货记录
+  const shipItems: ShipmentItem[] = items.map((si) => ({
+    id: randomUUID(),
+    order_item_id: si.order_item_id,
+    product_id: si.product_id,
+    product_name: si.product_name,
+    shipped_quantity: si.shipped_quantity,
+    unit: si.unit,
+  }))
+  const newShipment: Shipment = {
+    id: `ship-${String(shipments.length + 1).padStart(3, '0')}`,
+    order_id: order.id,
+    created_at: new Date().toISOString(),
+    shipped_by,
+    tracking_no,
+    carrier,
+    expected_arrival,
+    note,
+    items: shipItems,
+  }
+  shipments.push(newShipment)
+
+  // 计算是否全部发货，更新订单状态
+  const newShippedMap: Record<string, number> = { ...shippedMap }
+  for (const si of shipItems) {
+    newShippedMap[si.order_item_id] = (newShippedMap[si.order_item_id] || 0) + si.shipped_quantity
+  }
+  let allShipped = true
+  let anyShipped = false
+  let hasBackorder = false
+  for (const item of order.items) {
+    if (item.gifted) continue
+    const shipped = newShippedMap[item.id] || 0
+    if (shipped > 0) anyShipped = true
+    if (shipped < item.quantity) {
+      allShipped = false
+      if (shipped > 0 || item.quantity > 0) hasBackorder = true
+    }
+  }
+  if (allShipped) {
+    order.status = 'completed'
+  } else if (anyShipped) {
+    order.status = 'partial'
+  }
+
+  // 更新订单的预计到货日期
+  if (expected_arrival) {
+    order.expected_arrival = expected_arrival
+  }
+
+  // 自动生成 shipment 类型的跟进记录
+  const summary = shipItems
+    .filter((s) => order.items.find((i) => i.id === s.order_item_id && !i.gifted))
+    .map((s) => `${s.product_name}${s.shipped_quantity}${s.unit}`)
+    .join(' + ')
+  const backorderInfo: string[] = []
+  for (const item of order.items) {
+    if (item.gifted) continue
+    const shipped = newShippedMap[item.id] || 0
+    const back = item.quantity - shipped
+    if (back > 0) {
+      backorderInfo.push(`${item.product_name}欠${back}${item.unit}`)
+    }
+  }
+  followUps.push({
+    id: randomUUID(),
+    clinic_id: order.clinic_id,
+    type: 'shipment',
+    title: carrier && tracking_no ? `${carrier}已发货` : '部分发货',
+    content: `${summary || '赠品发货'}${backorderInfo.length > 0 ? `；待补发：${backorderInfo.join('，')}` : ''}${note ? `；备注：${note}` : ''}${tracking_no ? `；单号：${tracking_no}` : ''}`,
+    created_at: new Date().toISOString(),
+    related_order_id: order.id,
+    operator: shipped_by,
+  })
+
+  // 如果全部发货完成，追加一条完成记录
+  if (allShipped && backorderInfo.length === 0) {
+    followUps.push({
+      id: randomUUID(),
+      clinic_id: order.clinic_id,
+      type: 'note',
+      title: '订单完成发货',
+      content: `订单 ${order.id} 全部商品已发出，合计¥${order.total_amount.toFixed(2)}，请跟进客户收货和付款。`,
+      created_at: new Date().toISOString(),
+      related_order_id: order.id,
+      operator: shipped_by,
+    })
+  }
+
+  res.status(201).json({ success: true, data: newShipment })
 })
 
 export default router

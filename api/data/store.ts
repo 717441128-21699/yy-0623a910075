@@ -57,6 +57,7 @@ export interface Order {
   backorder_note?: string
   payment_due_days?: number
   payment_due_date?: string
+  expected_arrival?: string
 }
 
 export interface Reminder {
@@ -75,12 +76,44 @@ export interface Reminder {
 export interface FollowUp {
   id: string
   clinic_id: string
-  type: 'call' | 'visit' | 'quote' | 'order' | 'note'
+  type: 'call' | 'visit' | 'quote' | 'order' | 'note' | 'shipment'
   title: string
   content: string
   created_at: string
   related_order_id?: string
   operator?: string
+}
+
+export interface ShipmentItem {
+  id: string
+  order_item_id: string
+  product_id: string
+  product_name: string
+  shipped_quantity: number
+  unit: string
+}
+
+export interface Shipment {
+  id: string
+  order_id: string
+  created_at: string
+  shipped_by: string
+  tracking_no?: string
+  carrier?: string
+  expected_arrival?: string
+  items: ShipmentItem[]
+  note?: string
+}
+
+export interface DraftOrder {
+  id: string
+  clinic_id: string
+  clinic_name?: string
+  items: { product_id: string; product_name?: string; quantity: number }[]
+  note?: string
+  created_at: string
+  updated_at: string
+  created_by?: string
 }
 
 export interface GiftPolicy {
@@ -303,6 +336,95 @@ export const followUps: FollowUp[] = [
   { id: 'fu-007', clinic_id: 'clinic-005', type: 'note', title: '备注', content: '陈护士对价格敏感，每次订货都要比对3家，建议下次带些样品过去。', created_at: '2026-06-12T16:00:00', operator: '李明' },
   { id: 'fu-008', clinic_id: 'clinic-006', type: 'quote', title: '根管耗材报价', content: '发送了镍钛根管锉、根管封闭剂、牙胶尖的组合报价，张医生说下周给回复。', created_at: '2026-06-19T10:15:00', operator: '李明' },
   { id: 'fu-009', clinic_id: 'clinic-007', type: 'visit', title: '初次拜访', content: '赵院长表示目前有固定供应商，但对我们的麻药价格感兴趣，留了样和名片。', created_at: '2026-06-14T14:30:00', operator: '李明' },
+]
+
+// 给现有订单加上预计到货日期
+;(function patchOrders() {
+  for (const o of orders) {
+    if (o.id === 'ord-001') o.expected_arrival = '2026-05-12'
+    if (o.id === 'ord-002') o.expected_arrival = '2026-04-30'
+    if (o.id === 'ord-003') o.expected_arrival = '2026-06-17'
+    if (o.id === 'ord-004') o.expected_arrival = '2026-06-15'
+    if (o.id === 'ord-005') o.expected_arrival = '2026-06-20'
+    if (o.id === 'ord-006') o.expected_arrival = '2026-06-22'
+  }
+})()
+
+export const shipments: Shipment[] = [
+  {
+    id: 'ship-001',
+    order_id: 'ord-001',
+    created_at: '2026-05-10T14:00:00Z',
+    shipped_by: '李明',
+    tracking_no: 'SF1234567890',
+    carrier: '顺丰速运',
+    expected_arrival: '2026-05-12',
+    note: '上午已发货，预计次日到达',
+    items: [
+      { id: 'si-001', order_item_id: 'oi-001', product_id: 'prod-029', product_name: '碧兰麻注射液', shipped_quantity: 5, unit: '盒' },
+      { id: 'si-002', order_item_id: 'oi-002', product_id: 'prod-016', product_name: '医用丁腈手套', shipped_quantity: 20, unit: '盒' },
+      { id: 'si-003', order_item_id: 'oi-003', product_id: 'prod-016', product_name: '医用丁腈手套', shipped_quantity: 1, unit: '盒' },
+      { id: 'si-004', order_item_id: 'oi-004', product_id: 'prod-001', product_name: '瑞士ITI种植体', shipped_quantity: 10, unit: '颗' },
+    ],
+  },
+  {
+    id: 'ship-002',
+    order_id: 'ord-002',
+    created_at: '2026-04-28T16:00:00Z',
+    shipped_by: '李明',
+    tracking_no: 'JD9876543210',
+    carrier: '京东物流',
+    expected_arrival: '2026-04-30',
+    note: '走京东次日达',
+    items: [
+      { id: 'si-005', order_item_id: 'oi-005', product_id: 'prod-021', product_name: '根管锉ProTaper Gold', shipped_quantity: 8, unit: '盒' },
+      { id: 'si-006', order_item_id: 'oi-006', product_id: 'prod-025', product_name: '光固化复合树脂', shipped_quantity: 15, unit: '支' },
+    ],
+  },
+  {
+    id: 'ship-003',
+    order_id: 'ord-004',
+    created_at: '2026-06-10T17:00:00Z',
+    shipped_by: '李明',
+    tracking_no: 'YT2468013579',
+    carrier: '圆通速递',
+    expected_arrival: '2026-06-13',
+    note: '库存不足，先发出有库存的部分，碧兰麻欠货2盒、骨粉欠货2瓶',
+    items: [
+      { id: 'si-007', order_item_id: 'oi-009', product_id: 'prod-002', product_name: '韩国奥齿泰种植体', shipped_quantity: 20, unit: '颗' },
+      { id: 'si-008', order_item_id: 'oi-010', product_id: 'prod-029', product_name: '碧兰麻注射液', shipped_quantity: 2, unit: '盒' },
+      { id: 'si-009', order_item_id: 'oi-011', product_id: 'prod-004', product_name: 'ITI骨粉', shipped_quantity: 3, unit: '瓶' },
+    ],
+  },
+]
+
+export const draftOrders: DraftOrder[] = [
+  {
+    id: 'draft-001',
+    clinic_id: 'clinic-001',
+    clinic_name: '瑞尔齿科朝阳门诊',
+    items: [
+      { product_id: 'prod-001', product_name: '瑞士ITI种植体', quantity: 5 },
+      { product_id: 'prod-004', product_name: 'ITI骨粉', quantity: 3 },
+    ],
+    note: '张主任下周3颗种植手术，先选好，等他确认数量后再提交',
+    created_at: '2026-06-19T10:30:00Z',
+    updated_at: '2026-06-19T14:20:00Z',
+    created_by: '李明',
+  },
+  {
+    id: 'draft-002',
+    clinic_id: 'clinic-004',
+    clinic_name: '马泷齿科静安门诊',
+    items: [
+      { product_id: 'prod-029', product_name: '碧兰麻注射液', quantity: 10 },
+      { product_id: 'prod-031', product_name: '一次性注射器', quantity: 5 },
+    ],
+    note: '欠货的碧兰麻到货后通知，一起发',
+    created_at: '2026-06-18T15:00:00Z',
+    updated_at: '2026-06-18T15:00:00Z',
+    created_by: '李明',
+  },
 ]
 
 // 调整部分产品库存，制造一些欠货场景
